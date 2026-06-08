@@ -134,8 +134,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .from('groups')
         .select('*')
         .eq('id', groupId)
-        .single()
+        .maybeSingle()
       if (gErr) throw gErr
+      if (!groupData) {
+        throw new Error('Group not found')
+      }
 
       // 2. Fetch group members
       const { data: membersData, error: mErr } = await supabase
@@ -208,8 +211,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Fetch profiles for settlements manually or join if relation is set
       const settlementsWithProfiles = await Promise.all(
         (settlementsData || []).map(async (set: any) => {
-          const { data: payer } = await supabase.from('profiles').select('*').eq('id', set.payer_id).single()
-          const { data: payee } = await supabase.from('profiles').select('*').eq('id', set.payee_id).single()
+          const { data: payerData } = await supabase.from('profiles').select('*').eq('id', set.payer_id).maybeSingle()
+          const { data: payeeData } = await supabase.from('profiles').select('*').eq('id', set.payee_id).maybeSingle()
+          const fallbackProfile = (id: string): Profile => ({
+            id,
+            name: 'Unknown User',
+            email: '',
+            expense_id: 'SPX-000000',
+            created_at: new Date().toISOString()
+          })
+          const payer = payerData || fallbackProfile(set.payer_id)
+          const payee = payeeData || fallbackProfile(set.payee_id)
           return {
             ...set,
             amount: Number(set.amount),
@@ -328,9 +340,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .from('groups')
         .insert({ name, created_by: profile.id })
         .select()
-        .single()
+        .maybeSingle()
 
       if (gErr) throw gErr
+      if (!gData) throw new Error('Failed to create group: no data returned')
 
       // 2. Add creator as first member
       const { error: mErr } = await supabase
@@ -462,9 +475,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           receipt_url: receiptUrl,
         })
         .select()
-        .single()
+        .maybeSingle()
 
       if (expErr) throw expErr
+      if (!expData) throw new Error('Failed to create expense: no data returned')
 
       // 2. Prepare splits records
       // SplitsData contains profileId and their input value (e.g. ratio, percentage or fixed dollar amount)
@@ -636,10 +650,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (settlements) {
         await Promise.all(
           settlements.map(async (s: any) => {
-            const { data: payer } = await supabase.from('profiles').select('name').eq('id', s.payer_id).single()
-            const { data: payee } = await supabase.from('profiles').select('name').eq('id', s.payee_id).single()
-            const payerName = payer?.name === profile.name ? 'You' : payer?.name
-            const payeeName = payee?.name === profile.name ? 'You' : payee?.name
+            const { data: payer } = await supabase.from('profiles').select('name').eq('id', s.payer_id).maybeSingle()
+            const { data: payee } = await supabase.from('profiles').select('name').eq('id', s.payee_id).maybeSingle()
+            const payerName = payer ? (payer.name === profile.name ? 'You' : payer.name) : 'Unknown User'
+            const payeeName = payee ? (payee.name === profile.name ? 'You' : payee.name) : 'Unknown User'
 
             logs.push({
               id: s.id,
